@@ -1,3 +1,4 @@
+// author heng-an
 `define CYCLE_TIME 10
 `timescale 1ns/10ps
 module PATTERN(
@@ -127,7 +128,6 @@ end endtask
 task out_valid_wait_task; begin 
     // out_counter
     out_counter = 0;
-
     // check out_counter
     while(!out_valid)begin
         // out_counter++
@@ -143,33 +143,191 @@ task out_valid_wait_task; begin
     end
 end endtask
 
+reg [31:0] ze_immediate; 
+reg signed [31:0] se_immediate;
+// opcode //
+localparam R_TYPE = 6'b000000;
+localparam ANDI = 6'b000001;
+localparam ORI = 6'b000010;
+localparam ADDI = 6'b000011;
+localparam SUBI = 6'b000100;
+localparam LW = 6'b000101;
+localparam SW = 6'b000110;
+localparam BEQ = 6'b000111;
+localparam BNE = 6'b001000;
+localparam LUI = 6'b001001;
+localparam J = 6'b001010;
+localparam JAL = 6'b001011;
+// ALUop //
+localparam AND = 4'b0000;
+localparam OR = 4'b0001;
+localparam ADD = 4'b0010;
+localparam SUB = 4'b0011;
+localparam SLT = 4'b0100;
+localparam SLL = 4'b0101;
+localparam NOR = 4'b0110;
+localparam JR = 4'b0111;
 // check_ans_task
 task check_ans_task; begin
     // answer calculate
     opcode    = instruction[golden_inst_addr>>2][31:26];
     rs        = instruction[golden_inst_addr>>2][25:21];
 
-    // R-type
-    // I-type
-    // PC & jump, beq...etc.
+    
+    
     // hint: it's necessary to consider sign extension while calculating
-    /*
+    // R-type
+    rt = instruction[golden_inst_addr>>2][20:16];
+    rd = instruction[golden_inst_addr>>2][15:11];
+    shamt = instruction[golden_inst_addr>>2][10:6];
+    func = instruction[golden_inst_addr>>2][5:0];
+    // I-type
+    immediate = instruction[golden_inst_addr>>2][15:0];
+    ze_immediate = {16'b0,immediate};
+    se_immediate = (immediate[15] == 1'b1) ? {16'hffff, immediate[15:0]} : immediate;
+    // PC & jump, beq...etc.
+    address = instruction[golden_inst_addr>>2][25:0];
+    
+    // calculate golden answer
+    case(opcode)
+        // R-type
+        R_TYPE: begin
+            if(func!=JR)begin
+                golden_inst_addr = golden_inst_addr + 4;
+            end
+            case(func)
+                // AND
+                AND: begin
+                    golden_r[rd] = golden_r[rs] & golden_r[rt];
+                end
+                // OR
+                OR: begin
+                    golden_r[rd] = golden_r[rs] | golden_r[rt];
+                end
+                // ADD
+                ADD: begin
+                    golden_r[rd] = golden_r[rs] + golden_r[rt];
+                end
+                // SUB
+                SUB: begin
+                    golden_r[rd] = golden_r[rs] - golden_r[rt];
+                end
+                // SLT
+                SLT: begin
+                    if(golden_r[rs] < golden_r[rt])begin
+                        golden_r[rd] = 1;
+                    end
+                    else begin
+                        golden_r[rd] = 0;
+                    end
+                end
+                // SLL
+                SLL: begin
+                    golden_r[rd] = golden_r[rs] << shamt;
+                end
+                // NOR
+                NOR: begin
+                    golden_r[rd] = ~(golden_r[rs] | golden_r[rt]);
+                end
+                // JR
+                JR: begin
+                    golden_inst_addr = golden_r[rs];
+                end
+            endcase
+        end
+        // ANDI
+        ANDI: begin
+            golden_r[rt] = golden_r[rs] & ze_immediate;
+            golden_inst_addr = golden_inst_addr + 4;
+        end
+        // ORI
+        ORI: begin
+            golden_r[rt] = golden_r[rs] | ze_immediate;
+            golden_inst_addr = golden_inst_addr + 4;
+        end
+        // ADDI
+        ADDI: begin
+            golden_r[rt] = golden_r[rs] + se_immediate;
+            golden_inst_addr = golden_inst_addr + 4;
+        end
+        // SUBI
+        SUBI: begin
+            golden_r[rt] = golden_r[rs] - se_immediate;
+            golden_inst_addr = golden_inst_addr + 4;
+        end
+        // LW
+        LW: begin
+            golden_r[rt] = mem[golden_r[rs] + se_immediate];
+            if(golden_r[rs] + se_immediate < 0 || golden_r[rs] + se_immediate > 4096)begin
+                display_fail_task;
+                $display("-------------------------------------------------------------------");
+                $display("*                        PATTERN NO.%4d 	                        *",pat);
+                $display("*                 memory out of range on lw                       *");
+                $display("*                    Mem_Addr overflow @%d                        *",pat);
+                $display("-------------------------------------------------------------------");
+                repeat(2) @(negedge clk);
+                $finish;
+            end
+            golden_inst_addr = golden_inst_addr + 4;
+        end
+        // SW
+        SW: begin
+            mem[golden_r[rs] + se_immediate] = golden_r[rt];
+            if(golden_r[rs] + se_immediate < 0 || golden_r[rs] + se_immediate > 4096)begin
+                display_fail_task;
+                $display("-------------------------------------------------------------------");
+                $display("*                        PATTERN NO.%4d 	                        *",pat);
+                $display("*                 memory out of range on lw                       *");
+                $display("*                    Mem_Addr overflow @%d                        *",pat);
+                $display("-------------------------------------------------------------------");
+                repeat(2) @(negedge clk);
+                $finish;
+            end
+            golden_inst_addr = golden_inst_addr + 4;
+        end
+        // BEQ
+        BEQ: begin
+            if(golden_r[rs] == golden_r[rt])begin
+                golden_inst_addr = golden_inst_addr + 4 + {se_immediate,2'b00};
+            end
+            else begin
+                golden_inst_addr = golden_inst_addr + 4;
+            end
+        end
+        // BNE
+        BNE: begin
+            if(golden_r[rs] != golden_r[rt])begin
+                golden_inst_addr = golden_inst_addr + 4 + {se_immediate,2'b00};
+            end
+            else begin
+                golden_inst_addr = golden_inst_addr + 4;
+            end
+        end
+        // LUI
+        LUI: begin
+            golden_r[rt] = {immediate,16'b0};
+            golden_inst_addr = golden_inst_addr + 4;
+        end
+        // J
+        J: begin
+            golden_inst_addr = {golden_inst_addr[31:28],address<<2};
+        end
+        // JAL
+        JAL: begin
+            golden_r[31] = golden_inst_addr + 4;
+            golden_inst_addr = {golden_inst_addr[31:28],address<<2};
+        end
+        
+    endcase
 
 
-
-        Complete your function validation here
-
-
-
-    */
-
-    // check register
-    for(i=0;i<32;i=i+1)begin
+    // check registers
+    for(i = 0; i < 32; i = i + 1)begin
         if(My_SP.r[i] !== golden_r[i])begin
             display_fail_task;
             $display("-------------------------------------------------------------------");
-            $display("*                        PATTERN NO.%4d 	                        *",pat);
-            $display("*                   register [%2d]  error 	                    *",i);
+            $display("*                        PATTERN NO.%4d                          *",pat);
+            $display("*                   register [%2d]  error                      *",i);
             $display("*          answer should be : %d , your answer is : %d            *",golden_r[i],My_SP.r[i]);
             $display("-------------------------------------------------------------------");
             repeat(2) @(negedge clk);
@@ -177,17 +335,19 @@ task check_ans_task; begin
         end
     end
 
+    // check instruction address
     if(inst_addr !== golden_inst_addr)begin        
         display_fail_task;
         $display("-------------------------------------------------------------------");
-        $display("*                        PATTERN NO.%4d 	                        *",pat);
-        $display("*                          inst_addr  error 	                    *");
+        $display("*                        PATTERN NO.%4d                          *",pat);
+        $display("*                          inst_addr  error                        *");
         $display("*          answer should be : %d , your answer is : %d            *",golden_inst_addr,inst_addr);
         $display("-------------------------------------------------------------------");
         repeat(2) @(negedge clk);
         $finish;
     end
 
+    $display("*                        Pass PATTERN NO.%4d 	                  *",pat);
     @(negedge clk);
 end endtask
 
